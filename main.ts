@@ -1,8 +1,9 @@
+// Vice Heat — make.fun gta6-01 entry program
 // Vice Heat entry program (Node 22, stdlib only, no network).
 // Copies game/ and screenshots/ into the output directory and writes the
 // dossier buildDossier derives from them, so the grader sees exactly what
 // buildDossier writes. Output dir: $MAKEFUN_OUTPUT_DIR, else /output.
-import { cpSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-game.ts';
@@ -33,6 +34,14 @@ function countFiles(dir) {
   let n = 0;
   for (const e of readdirSync(dir, { withFileTypes: true })) {
     n += e.isDirectory() ? countFiles(join(dir, e.name)) : 1;
+  }
+  return n;
+}
+
+function countDirs(dir) {
+  let n = 0;
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    if (e.isDirectory()) n += 1 + countDirs(join(dir, e.name));
   }
   return n;
 }
@@ -71,7 +80,25 @@ function main() {
   const dossier = buildDossier(OUT, CAPS);
   writeFileSync(join(OUT, 'dossier.json'), dossier);
   const nGame = countFiles(join(OUT, 'game'));
-  console.log(`wrote ${OUT}/dossier.json (${dossier.length} bytes): ${nGame} game files, ${shotSummary.length} screenshots [${shotSummary.join(', ')}]`);
+  // Verify the dossier we just wrote: read it back, parse it, and check
+  // its own game-file count against the output tree on disk. buildDossier
+  // exposes that count in the dossier text block as "Totals: N files and
+  // directories" (the files and directories under game/, counted alike).
+  const written = readFileSync(join(OUT, 'dossier.json'), 'utf8');
+  let parsed;
+  try {
+    parsed = JSON.parse(written);
+  } catch (err) {
+    throw new Error(`dossier.json does not parse: ${err.message}`);
+  }
+  const totalMatch = /Totals: (\d+) files and directories/.exec(parsed.text || '');
+  if (!totalMatch) throw new Error('dossier.json has no game-file total to verify against');
+  const dossierEntries = Number(totalMatch[1]);
+  const actualEntries = nGame + countDirs(join(OUT, 'game'));
+  if (dossierEntries !== actualEntries) {
+    throw new Error(`dossier game-file count mismatch: dossier says ${dossierEntries} entries, output tree has ${actualEntries} (${nGame} files)`);
+  }
+  console.log(`wrote ${OUT}/dossier.json (${dossier.length} bytes, ${Buffer.byteLength(dossier, 'utf8')} bytes UTF-8): ${nGame} game files, ${shotSummary.length} screenshots [${shotSummary.join(', ')}]`);
 }
 
 main();
